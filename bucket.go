@@ -339,6 +339,27 @@ func (b *Bucket) Delete(key []byte) (er error, oldV []byte) {
 
 	return nil, oldV
 }
+func (b *Bucket) DeleteIfValue(key []byte, fn func(oldV []byte) bool) (er error, oldV []byte) {
+	if b.tx.db == nil {
+		return ErrTxClosed, nil
+	} else if !b.Writable() {
+		return ErrTxNotWritable, nil
+	}
+
+	// Move cursor to correct position.
+	c := b.Cursor()
+	_, _, flags := c.seek(key)
+
+	// Return an error if there is already existing bucket value.
+	if (flags & bucketLeafFlag) != 0 {
+		return ErrIncompatibleValue, nil
+	}
+
+	// Delete the node if we have a matching key.
+	oldV = c.node().delIfValue(key, fn)
+
+	return nil, oldV
+}
 
 // Sequence returns the current integer for the bucket without incrementing it.
 func (b *Bucket) Sequence() uint64 { return b.bucket.sequence }
