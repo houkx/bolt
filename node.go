@@ -140,6 +140,25 @@ func (n *node) put(oldKey, newKey, value []byte, pgid pgid, flags uint32) {
 	_assert(len(inode.key) > 0, "put: zero-length inode key")
 }
 
+func (n *node) delIfValue(key []byte, fn func(oldV []byte) bool) []byte {
+	// Find index of key.
+	index := sort.Search(len(n.inodes), func(i int) bool { return bytes.Compare(n.inodes[i].key, key) != -1 })
+
+	// Exit if the key isn't found.
+	if index >= len(n.inodes) || !bytes.Equal(n.inodes[index].key, key) {
+		return nil
+	}
+	oldV := n.inodes[index].value
+	if fn == nil || fn(oldV) {
+		// Delete inode from the node.
+		n.inodes = append(n.inodes[:index], n.inodes[index+1:]...)
+
+		// Mark the node as needing rebalancing.
+		n.unbalanced = true
+	}
+	return oldV
+}
+
 // del removes a key from the node.
 func (n *node) del(key []byte) []byte {
 	// Find index of key.
