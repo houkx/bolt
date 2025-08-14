@@ -282,43 +282,47 @@ func (b *Bucket) Get(key []byte) []byte {
 // If the key exist then its previous value will be overwritten.
 // Supplied value must remain valid for the life of the transaction.
 // Returns an error if the bucket was created from a read-only transaction, if the key is blank, if the key is too large, or if the value is too large.
-func (b *Bucket) Put(key []byte, value []byte) error {
+func (b *Bucket) Put(key []byte, value []byte) (error, []byte) {
 	if b.tx.db == nil {
-		return ErrTxClosed
+		return ErrTxClosed, nil
 	} else if !b.Writable() {
-		return ErrTxNotWritable
+		return ErrTxNotWritable, nil
 	} else if len(key) == 0 {
-		return ErrKeyRequired
+		return ErrKeyRequired, nil
 	} else if len(key) > MaxKeySize {
-		return ErrKeyTooLarge
+		return ErrKeyTooLarge, nil
 	} else if int64(len(value)) > MaxValueSize {
-		return ErrValueTooLarge
+		return ErrValueTooLarge, nil
 	}
 
 	// Move cursor to correct position.
 	c := b.Cursor()
-	k, _, flags := c.seek(key)
-
-	// Return an error if there is an existing key with a bucket value.
-	if bytes.Equal(key, k) && (flags&bucketLeafFlag) != 0 {
-		return ErrIncompatibleValue
+	k, v, flags := c.seek(key)
+	if !bytes.Equal(key, k) {
+		v = nil
+	} else if (flags & bucketLeafFlag) != 0 { // Return an error if there is an existing key with a bucket value.
+		return ErrIncompatibleValue, v
+	} else if len(value) <= 32 && len(v) > 0 && len(value) > 0 {
+		if bytes.Equal(value, v) { // skip When value Equals
+			return nil, v
+		}
 	}
 
 	// Insert into node.
 	key = cloneBytes(key)
 	c.node().put(key, key, value, 0, 0)
 
-	return nil
+	return nil, v
 }
 
 // Delete removes a key from the bucket.
 // If the key does not exist then nothing is done and a nil error is returned.
 // Returns an error if the bucket was created from a read-only transaction.
-func (b *Bucket) Delete(key []byte) error {
+func (b *Bucket) Delete(key []byte) (er error, oldV []byte) {
 	if b.tx.db == nil {
-		return ErrTxClosed
+		return ErrTxClosed, nil
 	} else if !b.Writable() {
-		return ErrTxNotWritable
+		return ErrTxNotWritable, nil
 	}
 
 	// Move cursor to correct position.
@@ -327,13 +331,13 @@ func (b *Bucket) Delete(key []byte) error {
 
 	// Return an error if there is already existing bucket value.
 	if (flags & bucketLeafFlag) != 0 {
-		return ErrIncompatibleValue
+		return ErrIncompatibleValue, nil
 	}
 
 	// Delete the node if we have a matching key.
-	c.node().del(key)
+	oldV = c.node().del(key)
 
-	return nil
+	return nil, oldV
 }
 
 // Sequence returns the current integer for the bucket without incrementing it.
